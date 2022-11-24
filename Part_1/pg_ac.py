@@ -26,7 +26,7 @@ class Policy(nn.Module):
         )
         # TODO: Task 1: Implement actor_logstd as a learnable parameter
         # Use log of std to make sure std doesn't become negative during training
-        self.actor_logstd = torch.nn.Parameter(torch.zeros(1))
+        self.actor_logstd = torch.nn.Parameter(torch.zeros(1, action_dim))
 
 
     def forward(self, state):
@@ -97,41 +97,34 @@ class PG(object):
         #        3. update parameters of the policy and the value function jointly
 
         state_values = self.value(states) # V(s) values from NN, torch[6]
-        #discounted_rewards = h.discount_rewards(rewards, self.gamma) # TD(0) targets, which are the discounted rewards torch[6]
-        next_state_values = self.value(next_states) # V(s+1) , torch(6)
 
-        value_targets = rewards + self.gamma * next_state_values*(1-dones)
+        with torch.no_grad():
+            next_state_values = self.value(next_states) # V(s+1) , torch(6)
+            value_targets = rewards + self.gamma * next_state_values* (1.-dones)
 
-        value_targets = value_targets.detach()
+        #value_targets = value_targets.detach()
 
-        mse_loss = torch.mean((state_values - value_targets)**2) # MSE loss between state values and targets y
-
-        #print(mse_loss)
+        #mse_loss = torch.mean((state_values - value_targets)**2) # MSE loss between state values and targets y
+        mse_loss = F.mse_loss(state_values, value_targets)
+   
         
-
-        #advantage = rewards + self.gamma*new_state_values  - next_state_values*(1-dones) # advantage, torch(6)
-        advantage = value_targets - state_values
-        #raise TypeError("Hello")
-
+        with torch.no_grad():
+            advantage = value_targets - state_values
+  
         # Normalizing the advantage to zero mean and unit variance 
 
-        advantage = (advantage - advantage.mean())/advantage.std()
+            advantage = (advantage - advantage.mean())/advantage.std()
 
 
         # Detatch advantage so that it does not affect the gradient 
 
-        advantage = advantage.detach()
+        #advantage = advantage.detach()
 
         # Policy loss 
 
 
-        #print(action_probs.size()) # size(6,1)
-        #print(action_probs.squeeze(-1).size()) # size(6) tensor(-0.0636, grad_fn=<NegBackward0>)
-        policy_loss = -torch.mean(torch.mul(action_probs.squeeze(-1),advantage))
-
-        #print(policy_loss)
-
-        #raise TypeError('heloo')
+        weighted_probs = -action_probs*advantage
+        policy_loss = torch.mean(weighted_probs)
 
         combined_loss = policy_loss + mse_loss # combined loss of value network and policy network 
 
@@ -168,9 +161,7 @@ class PG(object):
         else: 
             action = self.policy(x).sample()
 
-        act_logprob = self.policy(x).log_prob(action)
-        
-
+        act_logprob = self.policy(x).log_prob(action).sum(-1).squeeze()
 
         ########## Your code ends here. ###########
 
